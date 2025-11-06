@@ -1,97 +1,84 @@
+<script setup>
+import { ref } from 'vue';
+// 1. 引入您的 Steps.vue 组件
+import Steps from './Steps.vue'; // 假设 Steps.vue 在同级目录
+
+// 2. 定义步骤图所需的数据
+const stepsData = ref([
+  { id: 1, title: '已提交', status: 'submitted', type: 'check' },
+  { id: 2, title: '审核中', status: 'pending', type: 'wait' },
+  { id: 3, title: '待修改', status: 'uncommitted', type: 'edit' },
+  { id: 4, title: '待分配', status: 'waiting', type: 'user' },
+  { id: 5, title: '已完成', status: 'waiting', type: 'check' } // 最后一个用 'waiting' 状态, 但会根据 currentStep 变灰
+]);
+
+// 3. 定义当前激活的步骤 (索引从 0 开始)
+const current = ref(2); // 当前在 '待修改' 这一步
+
+// 模拟操作
+const nextStep = () => {
+  if (current.value < stepsData.value.length - 1) {
+    current.value++;
+  }
+};
+
+const prevStep = () => {
+  if (current.value > 0) {
+    current.value--;
+  }
+};
+</script>
+
 <template>
-  <div class="app">
-    <h2>业务流程步骤</h2>
-    <CustomSteps :steps="stepsData" />
+  <div class="app-container">
+    <h2 style="text-align: center;">动态步骤图组件</h2>
     
+    <!-- 4. 使用组件 -->
+    <Steps :steps="stepsData" :current-step="current" />
+
     <div class="controls">
-      <button @click="changeStatus">模拟状态变化</button>
+      <button @click="prevStep" :disabled="current === 0">上一步</button>
+      <button @click="nextStep" :disabled="current === stepsData.length - 1">下一步</button>
+      <p>当前步骤索引: {{ current }} ({{ stepsData[current].title }})</p>
     </div>
   </div>
 </template>
 
-<script setup>
-import { ref } from 'vue'
-import CustomSteps from './CustomSteps.vue'
-
-const stepsData = ref([
-  {
-    type: 'submitted',
-    title: '提交申请',
-    description: '2024-01-10 10:30'
-  },
-  {
-    type: 'processing',
-    title: '审核中',
-    description: '预计2个工作日'
-  },
-  {
-    type: 'pending',
-    title: '待批准',
-    description: '等待主管审批'
-  },
-  {
-    type: 'unsubmitted',
-    title: '待完成',
-    description: '最后环节'
-  }
-])
-
-const changeStatus = () => {
-  // 模拟状态变化
-  stepsData.value = [
-    {
-      type: 'success',
-      title: '提交申请',
-      description: '已完成'
-    },
-    {
-      type: 'success',
-      title: '审核通过',
-      description: '2024-01-11 15:20'
-    },
-    {
-      type: 'processing',
-      title: '批准中',
-      description: '进行中...'
-    },
-    {
-      type: 'pending',
-      title: '待完成',
-      description: '等待处理'
-    }
-  ]
+<style>
+/* 示例 App 的一些简单样式 */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  padding: 20px;
+  background-color: #f4f7f6;
 }
-</script>
-
-<style scoped>
-.app {
-  max-width: 1000px;
-  margin: 0 auto;
-  padding: 40px 20px;
+.app-container {
+  max-width: 900px;
+  margin: 40px auto;
+  padding: 30px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
-
-h2 {
-  text-align: center;
-  margin-bottom: 40px;
-  color: #333;
-}
-
 .controls {
-  margin-top: 40px;
   text-align: center;
+  margin-top: 30px;
 }
-
-button {
-  padding: 10px 24px;
-  background: #1890ff;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
+.controls button {
   font-size: 14px;
+  padding: 10px 18px;
+  margin: 0 10px;
+  border: none;
+  border-radius: 5px;
+  background-color: #409eff;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
-
-button:hover {
-  background: #40a9ff;
+.controls button:hover:not(:disabled) {
+  background-color: #66b1ff;
+}
+.controls button:disabled {
+  background-color: #c0c4cc;
+  cursor: not-allowed;
 }
 </style>
