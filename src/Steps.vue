@@ -1,487 +1,441 @@
-<template>
-  <div class="collapsible-card">
-    <div class="card-header">
-      <button class="toggle-btn" @click="toggle">
-        <span class="arrow" :class="{ expanded: isExpanded }">▼</span>
-      </button>
-      <h3 class="card-title">{{ title }}</h3>
-    </div>
-    
-    <div 
-      ref="cardBodyRef"
-      class="card-body" 
-      :class="{ collapsed: !isExpanded, expanded: isExpanded }"
-      @scroll="handleScroll"
-    >
-      <div v-if="isInitialLoading" class="loading-indicator">
-        <span class="spinner"></span> 加载数据中...
-      </div>
-
-      <div v-else-if="items.length === 0" class="empty-state">
-        暂无项目数据
-      </div>
-
-      <template v-else>
-        <div class="progress-item" v-for="item in items" :key="item.id">
-          <div class="item-label">{{ item.label }}</div>
-          
-          <div class="progress-track">
-            <div class="progress-line">
-              <div 
-                class="progress-line-fill"
-                :style="{ width: getProgressWidth(item.currentStep, item.nodes.length) + '%' }"
-              ></div>
-            </div>
-            
-            <div class="progress-nodes">
-              <div 
-                class="node" 
-                v-for="(node, index) in item.nodes" 
-                :key="index"
-              >
-                <div 
-                  class="node-circle"
-                  :class="getNodeStatus(index, item.currentStep)"
-                ></div>
-                <span 
-                  class="node-label"
-                  :class="getNodeStatus(index, item.currentStep)"
-                >{{ node }}</span>
-              </div>
-            </div>
-          </div>
-          
-          <div class="status-indicator">
-            <component 
-              :is="statusConfig[item.status]?.icon" 
-              class="status-icon" 
-              :style="{ color: statusConfig[item.status]?.color }"
-            />
-            <span class="status-text" :class="item.status">{{ item.statusText }}</span>
-          </div>
-        </div>
-
-        <div v-if="isLoadingMore" class="loading-more-indicator">
-          <span class="spinner"></span> 正在加载更多...
-        </div>
-
-        <div v-if="!hasMoreData && !isLoadingMore && items.length > 0" class="no-more-data">
-          --- 没有更多数据了 ---
-        </div>
-      </template>
-    </div>
-  </div>
-</template>
-
 <script setup>
-// import { ref } from 'vue'; // 修改: 引入 onMounted
-import { ref, onMounted } from 'vue';
+// 新增: 导入 watch
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 
-const title = ref('季度專案進度');
-// const items = ref([...]); // 修改: 初始為空數組
-const items = ref([]);
-const isExpanded = ref(true);
-
-const statusConfig = {
-  running: { icon: 'Loading', color: '#4CAF50' },
-  completed: { icon: 'CircleCheck', color: '#2196F3' },
-  pending: { icon: 'Clock', color: '#FF9800' },
-  paused: { icon: 'VideoPause', color: '#9E9E9E' }
-};
-
-const toggle = () => {
-  isExpanded.value = !isExpanded.value;
-};
-
-const getNodeStatus = (nodeIndex, currentStep) => {
-  if (nodeIndex < currentStep) {
-    return 'completed';
-  } else if (nodeIndex === currentStep) {
-    return 'active';
+// 定义组件的 props
+const props = defineProps({
+  // 步骤数据数组
+  // 示例: [{ id: 1, title: '步骤1', status: 'submitted', type: 'check' }, ...]
+  steps: {
+    type: Array,
+    default: () => []
+  },
+  // 当前激活的步骤索引
+  currentStep: {
+    type: Number,
+    default: 0
+  },
+  // 新增: 指定要滚动到的步骤 ID
+  scrollToStepId: {
+    type: [String, Number],
+    default: null
+  },
+  // 新增: 是否在 currentStep 变化时自动将其居中
+  centerOnCurrentStep: {
+    type: Boolean,
+    default: false // 默认为 false
   }
-  return 'pending';
+});
+
+// 内部图标映射
+const iconMap = {
+  // ... (图标映射不变)
+  check: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`,
+  user: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`,
+  edit: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`,
+  wait: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>`,
 };
 
-const getProgressWidth = (currentStep, totalSteps) => {
-  if (totalSteps <= 1) return 0; // 防止除以 0
-  return (currentStep / (totalSteps - 1)) * 100;
+// 滚动相关的响应式状态
+const scrollContainer = ref(null);
+const showLeftButton = ref(false);
+const showRightButton = ref(false);
+
+/**
+ * 根据 type 获取图标的 SVG 字符串
+ * @param {string} type - 步骤的类型
+ */
+const getIcon = (type) => {
+  return iconMap[type] || '';
 };
 
+/**
+ * 获取步骤项的 CSS 类
+ * @param {object} step - 步骤对象
+ * @param {number} index - 步骤索引
+ */
+const getStepClasses = (step, index) => {
+  // ... (此函数不变)
+  const classes = ['step-item'];
+  
+  if (index === props.currentStep) {
+    classes.push('is-active');
+  } else if (index < props.currentStep) {
+    classes.push('is-completed');
+  }
 
-// --- 以下為新增的邏輯 ---
+  if (step.status) {
+    classes.push(`status-${step.status}`);
+  }
 
-// --- 状态 Ref ---
-const cardBodyRef = ref(null);      // 對 .card-body 的引用
-const isInitialLoading = ref(true); // 是否正在進行初始加載
-const isLoadingMore = ref(false);  // 是否正在加載更多
-const hasMoreData = ref(true);      // 是否還有更多數據可加載
-let page = 1;                       // 當前頁碼
-const PAGE_SIZE = 4;                // 每次加載的項目數
+  return classes.join(' ');
+};
 
-// --- 模擬的數據庫 ---
-const allMockProjects = [
-  { id: 'proj-a', label: '核心引擎升級', currentStep: 2, nodes: ['規劃', '設計', '開發', '測試', '部署'], status: 'running', statusText: '進行中' },
-  { id: 'proj-b', label: '使用者介面重構', currentStep: 4, nodes: ['需求分析', '原型設計', 'UI/UX 設計', '前端開發', '整合測試'], status: 'completed', statusText: '已完成' },
-  { id: 'proj-c', label: '後端 API 優化', currentStep: 1, nodes: ['效能分析', '重構', '壓力測試', '上線'], status: 'pending', statusText: '待開始' },
-  { id: 'proj-d', label: '文件系統遷移', currentStep: 0, nodes: ['評估', '遷移', '驗證'], status: 'paused', statusText: '已暫停' },
-  // --- 更多模擬數據 ---
-  { id: 'proj-e', label: '新功能开发', currentStep: 0, nodes: ['调研', '开发', '上线'], status: 'pending', statusText: '待开始' },
-  { id: 'proj-f', label: '移动端适配', currentStep: 1, nodes: ['设计', '开发', '测试'], status: 'running', statusText: '进行中' },
-  { id: 'proj-g', label: '数据迁移', currentStep: 3, nodes: ['A', 'B', 'C', 'D'], status: 'completed', statusText: '已完成' },
-  { id: 'proj-h', label: '性能调优', currentStep: 1, nodes: ['分析', '优化', '测试'], status: 'paused', statusText: '已暂停' },
-  { id: 'proj-i', label: '安全漏洞修复', currentStep: 2, nodes: ['审计', '修复', '验证', '上线'], status: 'running', statusText: '进行中' },
-  { id: 'proj-j', label: 'CI/CD 流水线', currentStep: 0, nodes: ['调研', '实施', '推广'], status: 'pending', statusText: '待开始' }
-];
+/**
+ * 检查是否需要显示滚动按钮
+ */
+const checkScrollButtons = () => {
+  if (!scrollContainer.value) return;
+  
+  const { scrollLeft, scrollWidth, clientWidth } = scrollContainer.value;
+  
+  showLeftButton.value = scrollLeft > 0;
+  showRightButton.value = scrollLeft < scrollWidth - clientWidth - 1;
+};
 
-// --- 模擬 API 函數 ---
-const fetchProjectsAPI = (pageToFetch, pageSize) => {
-  console.log(`Fetching page ${pageToFetch}...`);
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const start = (pageToFetch - 1) * pageSize;
-      const end = pageToFetch * pageSize;
-      const newItems = allMockProjects.slice(start, end);
-      resolve(newItems);
-    }, 1200); // 模擬 1.2 秒的網絡延遲
+/**
+ * 向左滚动
+ */
+const scrollLeft = () => {
+  // ... (此函数不变)
+  if (!scrollContainer.value) return;
+  
+  scrollContainer.value.scrollBy({
+    left: -200,
+    behavior: 'smooth'
   });
 };
 
-// --- 加載更多數據的函數 ---
-const loadMore = async () => {
-  // 如果正在加載或沒有更多數據了，則直接返回
-  if (isLoadingMore.value || !hasMoreData.value) return;
-
-  isLoadingMore.value = true;
-  const newItems = await fetchProjectsAPI(page, PAGE_SIZE);
+/**
+ * 向右滚动
+ */
+const scrollRight = () => {
+  // ... (此函数不变)
+  if (!scrollContainer.value) return;
   
-  if (newItems.length > 0) {
-    items.value = [...items.value, ...newItems];
-    page++; // 頁碼 + 1，準備下次加載
-  } else {
-    hasMoreData.value = false; // 標記為沒有更多數據
-  }
-  
-  isLoadingMore.value = false;
+  scrollContainer.value.scrollBy({
+    left: 200,
+    behavior: 'smooth'
+  });
 };
 
-// --- 滾動事件處理函數 ---
-const handleScroll = () => {
-  const el = cardBodyRef.value;
-  if (!el) return;
-  
-  // 檢查是否滾動到底部 (留出 50px 的緩衝區)
-  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
-    loadMore();
+// --- 新增功能 ---
+
+/**
+ * (内部) 滚动到指定索引的步骤，并使其居中
+ * @param {number} index - 步骤的索引
+ */
+const _scrollToIndex = (index) => {
+  if (index < 0 || !scrollContainer.value) return;
+
+  const stepElements = scrollContainer.value.children;
+  if (!stepElements || !stepElements[index]) {
+    console.warn(`[Steps] 无法找到索引为 ${index} 的步骤元素。`);
+    return;
   }
+  
+  const targetElement = stepElements[index];
+  const container = scrollContainer.value;
+
+  const targetLeft = targetElement.offsetLeft;
+  const targetWidth = targetElement.clientWidth;
+  const containerWidth = container.clientWidth;
+
+  // 修正：为了视觉上更居中，我们从目标元素的宽度中减去连接线的宽度（160px）的���半，
+  // 因为连接线在右侧，导致视觉重心偏左。
+  // margin-right 是 40px, connector-line 是 160px. 我们取一个中间值来调整。
+  // 一个比较好的视觉偏移量大约是 (min-width + margin-right) / 2 - min-width / 2 = 20px
+  const visualOffset = 20; // 视觉偏移量
+
+  const scrollTo = (targetLeft + targetWidth / 2) - (containerWidth / 2) - visualOffset;
+
+  container.scrollTo({
+    left: scrollTo,
+    behavior: 'smooth'
+  });
 };
 
-// --- 組件掛載時，加載初始數據 ---
-onMounted(async () => {
-  isInitialLoading.value = true;
-  const initialItems = await fetchProjectsAPI(page, PAGE_SIZE);
-  items.value = initialItems;
-  page++; // 頁碼 + 1
-  isInitialLoading.value = false;
-  
-  // 檢查初始加載後是否就沒有更多數據了
-  if (initialItems.length < PAGE_SIZE) {
-    hasMoreData.value = false;
+// 新增: 监听 scrollToStepId prop 的变化
+watch(() => props.scrollToStepId, (newId) => {
+  if (newId !== null && props.steps.length > 0 && scrollContainer.value) {
+    const index = props.steps.findIndex(step => step.id === newId);
+    if (index >= 0) {
+      _scrollToIndex(index);
+    } else {
+      console.warn(`[Steps] scrollToStepId: 未在 steps 数组中找到 ID "${newId}"。`);
+    }
   }
+}, { flush: 'post' });
+
+// 新增: 监听 currentStep prop 的变化 (如果 centerOnCurrentStep 为 true)
+watch(() => props.currentStep, (newIndex) => {
+  if (props.centerOnCurrentStep && newIndex >= 0 && scrollContainer.value) {
+    _scrollToIndex(newIndex);
+  }
+}, { flush: 'post' });
+
+// --- 修改后的 onMounted ---
+
+// 组件挂载后设置监听
+onMounted(() => {
+  if (scrollContainer.value) {
+    checkScrollButtons();
+    scrollContainer.value.addEventListener('scroll', checkScrollButtons);
+    window.addEventListener('resize', checkScrollButtons);
+
+    if (props.scrollToStepId !== null) {
+      const index = props.steps.findIndex(step => step.id === props.scrollToStepId);
+      if (index >= 0) {
+        setTimeout(() => _scrollToIndex(index), 100);
+      }
+    } 
+    else if (props.centerOnCurrentStep && props.currentStep >= 0) {
+      setTimeout(() => _scrollToIndex(props.currentStep), 100);
+    }
+  }
+});
+
+// 组件卸载前清理监听
+onUnmounted(() => {
+  if (scrollContainer.value) {
+    scrollContainer.value.removeEventListener('scroll', checkScrollButtons);
+  }
+  window.removeEventListener('resize', checkScrollButtons);
 });
 
 </script>
 
+<template>
+  <div class="steps-wrapper">
+    <button 
+      v-if="showLeftButton"
+      class="scroll-button scroll-button-left"
+      @click="scrollLeft"
+      aria-label="向左滚动"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+      </svg>
+    </button>
+    <div class="steps-container" ref="scrollContainer">
+      <div
+        v-for="(step, index) in steps"
+        :key="step.id || index"
+        :class="getStepClasses(step, index)"
+      >
+        <div class="step-node">
+          <div 
+            v-if="getIcon(step.type)" 
+            class="step-icon" 
+            v-html="getIcon(step.type)"
+          ></div>
+          <span v-else class="step-number">{{ index + 1 }}</span>
+        </div>
+        <div class="step-title">{{ step.title }}</div>
+        <div class="connector-line"></div>
+      </div>
+    </div>
+    <button 
+      v-if="showRightButton"
+      class="scroll-button scroll-button-right"
+      @click="scrollRight"
+      aria-label="向右滚动"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
+      </svg>
+    </button>
+  </div>
+</template>
+
 <style scoped>
-.collapsible-card {
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  margin-bottom: 20px;
-  overflow: hidden;
-}
-
-.card-header {
-  padding: 16px 20px;
-  background: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
-  display: flex;
-  align-items: center;
-  user-select: none;
-  transition: background 0.2s;
-  cursor: pointer; /* 讓標頭看起來可以點擊 */
-}
-
-.card-header:hover {
-  background: #e9ecef;
-}
-
-.card-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #333;
-}
-
-.toggle-btn {
-  background: none;
-  border: none;
-  color: #666;
-  cursor: pointer;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  transition: color 0.2s;
-  margin-right: 12px;
-}
-
-.toggle-btn:hover {
-  color: #333;
-}
-
-.arrow {
-  display: inline-block;
-  transition: transform 0.3s ease;
-}
-
-.arrow.expanded {
-  transform: rotate(180deg);
-}
-
-.card-body {
-  overflow: hidden;
-  transition: max-height 0.3s ease, padding 0.3s ease;
-}
-
-.card-body.collapsed {
-  max-height: 0;
-  padding: 0;
-}
-
-.card-body.expanded {
-  /* 修改: 設置最大高度並允許滾動 */
-  max-height: 500px; /* 您可以根據需要調整這個高度 */
-  overflow-y: auto;
-  padding: 20px;
-}
-
-.progress-item {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 20px;
-  border-bottom: 1px solid #f0f0f0;
-  min-height: 80px;
-}
-
-.progress-item:last-child {
-  border-bottom: none;
-}
-
-.item-label {
-  width: 33.33%;
-  font-size: 15px;
-  color: #333;
-  font-weight: 500;
-  padding-right: 20px;
-  flex-shrink: 0;
-}
-
-.progress-track {
-  width: 33.33%;
-  position: relative;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  flex-shrink: 0;
-}
-
-.progress-line {
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  right: 10px;
-  height: 4px;
-  background: #e9ecef;
-  transform: translateY(-50%);
-  border-radius: 2px;
-}
-
-.progress-line-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: linear-gradient(90deg, #4CAF50, #66BB6A);
-  transition: width 0.5s ease;
-  border-radius: 2px;
-}
-
-.progress-nodes {
+/* CSS 样式部分完全不变 */
+/* 外层包装器 */
+.steps-wrapper {
   position: relative;
   width: 100%;
   display: flex;
-  justify-content: space-between;
-  z-index: 1;
+  align-items: center;
 }
 
-.node {
+/* 滚动按钮通用样式 */
+.scroll-button {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #fff;
+  border: 1px solid #dcdfe6;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.scroll-button:hover {
+  background-color: #f5f7fa;
+  border-color: #409eff;
+  color: #409eff;
+}
+
+.scroll-button:active {
+  transform: scale(0.95);
+}
+
+.scroll-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* 左侧按钮 */
+.scroll-button-left {
+  margin-right: 10px;
+}
+
+/* 右侧按钮 */
+.scroll-button-right {
+  margin-left: 10px;
+}
+
+/* 整个步骤图容器 */
+.steps-container {
+  display: flex;
+  width: 100%;
+  padding: 20px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  /* 隐藏滚动条 */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+/* 隐藏滚动条 - Webkit浏览器 */
+.steps-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* 每个步骤项 */
+.step-item {
+  flex: 0 0 auto; /* 不缩放，保持固定宽度 */
+  min-width: 120px; /* 最小宽度 */
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  text-align: center;
+  color: #c0c4cc; /* 默认颜色 (未激活) */
+  margin-right: 40px; /* 步骤之间的间距 */
 }
 
-.node-circle {
-  width: 18px;
-  height: 18px;
+.step-item:last-child {
+  margin-right: 0;
+}
+
+/* 步骤节点 (圆圈) */
+.step-node {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: white;
-  border: 3px solid #e9ecef;
-  transition: all 0.3s ease;
-  position: relative;
-}
-
-.node-circle.active {
-  background: #4CAF50;
-  border-color: #4CAF50;
-  box-shadow: 0 0 0 4px rgba(76, 175, 80, 0.2);
-  animation: pulse-node 2s infinite;
-}
-
-.node-circle.completed {
-  background: #4CAF50;
-  border-color: #4CAF50;
-}
-
-.node-circle.completed::after {
-  content: '✓';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 11px;
-  font-weight: bold;
-}
-
-@keyframes pulse-node {
-  0%, 100% {
-    box-shadow: 0 0 0 4px rgba(76, 175, 80, 0.2);
-  }
-  50% {
-    box-shadow: 0 0 0 8px rgba(76, 175, 80, 0);
-  }
-}
-
-.node-label {
-  font-size: 12px;
-  color: #999;
-  white-space: nowrap;
-  transition: color 0.3s ease;
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.node-label.active {
-  color: #4CAF50;
-  font-weight: 600;
-}
-
-.node-label.completed {
-  color: #666;
-}
-
-.status-indicator {
-  width: 33.33%;
+  border: 2px solid #c0c4cc;
+  background-color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  flex-shrink: 0;
+  font-weight: bold;
+  font-size: 16px;
+  z-index: 1; /* 覆盖在连接线之上 */
+  transition: all 0.3s ease;
 }
 
-.status-icon {
+/* 步骤图标 */
+.step-icon {
   width: 18px;
   height: 18px;
+  color: inherit; /* 继承父级 .step-node 的颜色 */
+}
+/* v-html 注入的 svg 默认没有大小 */
+.step-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
+  fill: currentColor; /* 使用 CSS 的 color 属性填充 */
 }
 
-.status-text {
+/* 步骤标题 */
+.step-title {
+  margin-top: 8px;
   font-size: 14px;
+  white-space: nowrap; /* 防止标题换行 */
+}
+
+/* 连接线 */
+.connector-line {
+  position: absolute;
+  top: 15px; /* (32px / 2) - 1px (线高) */
+  left: 50%;
+  width: 160px; /* 固定连接线宽度 */
+  height: 2px;
+  background-color: #c0c4cc; /* 默认线条颜色 */
+  z-index: 0;
+  transition: background-color 0.3s ease;
+}
+
+/* 隐藏最后一个步骤项的连接线 */
+.step-item:last-child .connector-line {
+  display: none;
+}
+
+/* --- 状态样式 --- */
+
+/* 已完成/已提交 状态 */
+.step-item.is-completed,
+.step-item.status-submitted {
+  color: #409eff; /* 主题蓝 */
+}
+.step-item.is-completed .step-node,
+.step-item.status-submitted .step-node {
+  border-color: #409eff;
+  color: #409eff;
+}
+.step-item.is-completed .connector-line,
+.step-item.status-submitted .connector-line {
+  background-color: #409eff;
+}
+/* 已完成状态下图标颜色 */
+.step-item.is-completed .step-icon,
+.step-item.status-submitted .step-icon {
+  color: #409eff;
+}
+
+/* 激活状态 (当前步骤) */
+.step-item.is-active {
+  color: #303133; /* 激活的文字深色 */
   font-weight: 500;
 }
-
-.status-text.running {
-  color: #4CAF50;
+.step-item.is-active .step-node {
+  border-color: #409eff;
+  background-color: #409eff;
+  color: #fff; /* 激活的图标/数字为白色 */
 }
-
-.status-text.pending {
-  color: #FF9800;
-}
-
-.status-text.completed {
-  color: #2196F3;
-}
-
-.status-text.paused {
-  color: #9E9E9E;
-}
-
-/* --- 新增 CSS 樣式 --- */
-
-.loading-indicator,
-.empty-state,
-.loading-more-indicator,
-.no-more-data {
-  padding: 30px;
-  text-align: center;
-  color: #888;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
-.no-more-data {
-  color: #bbb;
-  font-size: 13px;
-}
-
-/* 簡易 CSS 加載動畫 */
-.spinner {
-  width: 18px;
-  height: 18px;
-  border: 3px solid rgba(0, 0, 0, 0.1);
-  border-left-color: #4CAF50; /* 主題色 */
-  border-radius: 50%;
-  display: inline-block;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.step-item.is-active .step-icon {
+  color: #fff;
 }
 
 
-@media (max-width: 992px) {
-  .progress-item {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 15px;
-    padding: 16px;
-  }
+/* 待提交 (pending) 状态 - 示例 (黄色) */
+.step-item.status-pending {
+  color: #e6a23c;
+}
+.step-item.status-pending .step-node {
+  border-color: #e6a23c;
+  color: #e6a23c;
+}
+.step-item.status-pending .step-icon {
+  color: #e6a23c;
+}
 
-  .item-label,
-  .progress-track,
-  .status-indicator {
-    width: 100%;
-  }
-
-  .status-indicator {
-    justify-content: flex-start;
-  }
+/* 未提交 (uncommitted) 状态 - 示例 (红色) */
+.step-item.status-uncommitted {
+  color: #f56c6c;
+}
+.step-item.status-uncommitted .step-node {
+  border-color: #f56c6c;
+  color: #f56c6c;
+}
+.step-item.status-uncommitted .step-icon {
+  color: #f56c6c;
 }
 </style>
